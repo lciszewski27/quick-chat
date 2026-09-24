@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "material-design-3": {
+      "source": "gdlbo/material-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "bdad20e25c8be9ff1d20da210e86a2aa0302bae05126c8ae2a489f9cf6ee0053"
+    }
+  }
+}

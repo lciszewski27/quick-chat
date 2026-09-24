@@ -5,7 +5,7 @@
 ![Kotlin](https://img.shields.io/badge/kotlin-%230095D5.svg?style=flat-square&logo=kotlin&logoColor=white)
 ![Android API](https://img.shields.io/badge/API-31%2B-brightgreen.svg?style=flat-square&logo=android)
 ![Material Design 3](https://img.shields.io/badge/UI-Material_3_Expressive-blueviolet.svg?style=flat-square)
-![License](https://img.shields.io/github/license/lciszewski27/quickchat?style=flat-square)
+![License](https://img.shields.io/github/license/lciszewski27/quick-chat?style=flat-square)
 
 Chat with Gemini, OpenAI, Claude, OpenRouter, DeepSeek, any OpenAI-compatible endpoint, or fully offline with on-device Gemini Nano. History, favorites, API keys, and skills stay on your device; only your messages go to the selected provider.
 

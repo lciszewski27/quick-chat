@@ -1,5 +1,6 @@
 package dev.lciszewski27.quickchat.data.ai
 
+import dev.lciszewski27.quickchat.data.ai.skills.SkillToolSource
 import dev.lciszewski27.quickchat.data.ai.tools.AiTool
 import dev.lciszewski27.quickchat.domain.model.AiModelInfo
 import dev.lciszewski27.quickchat.domain.model.ChatTurn
@@ -38,7 +39,8 @@ private const val MAX_TOOL_ROUNDS = 5
 class SdkProvider(
     private val config: ProviderConfig,
     private val sdk: LlmSdk,
-    private val tools: List<AiTool> = emptyList()
+    private val tools: List<AiTool> = emptyList(),
+    private val skillTools: SkillToolSource? = null
 ) : AiProvider {
 
     override val id: String get() = config.id
@@ -142,9 +144,12 @@ class SdkProvider(
         // no auth); the ViewModel decides whether a missing key blocks sending.
         require(modelId.isNotBlank()) { "No model selected — star one in Settings → Models" }
         val temp = temperature.coerceIn(0f, 2f)
+        // Skills are resolved per request: the same static registry serves
+        // every provider, freshly filtered to tested + enabled.
+        val allTools = tools + (skillTools?.load().orEmpty())
         when (config.protocol) {
-            LlmProtocol.OPENAI -> runOpenAiLoop(apiKey, modelId, history, systemPrompt, temp)
-            LlmProtocol.ANTHROPIC -> runAnthropicLoop(apiKey, modelId, history, systemPrompt, temp)
+            LlmProtocol.OPENAI -> runOpenAiLoop(apiKey, modelId, history, systemPrompt, temp, allTools)
+            LlmProtocol.ANTHROPIC -> runAnthropicLoop(apiKey, modelId, history, systemPrompt, temp, allTools)
         }
     }
 
@@ -154,22 +159,23 @@ class SdkProvider(
         model: String,
         history: List<ChatTurn>,
         systemPrompt: String?,
-        temperature: Float
+        temperature: Float,
+        tools: List<AiTool>
     ) {
         val messages = mutableListOf<OpenAiMessage>().apply {
             systemPrompt?.takeIf { it.isNotBlank() }?.let { add(OpenAiMessage("system", it)) }
             history.forEach { add(OpenAiMessage(openAiRole(it.role), it.text)) }
         }
-        val toolsArray = if (tools.isEmpty()) null else openAiToolsArray()
+        val toolsArray = if (tools.isEmpty()) null else openAiToolsArray(tools)
         val tracker = EmitTracker()
         try {
-            loopOpenAiRounds(apiKey, model, messages, temperature, toolsArray, tracker)
+            loopOpenAiRounds(apiKey, model, messages, temperature, toolsArray, tracker, tools)
         } catch (e: IOException) {
             // Older/partial OpenAI-compatible servers may 400 on `tools`.
             // A 400 before any chunk means the first request was rejected —
             // safe to retry once without tools (nothing was emitted yet).
             if (toolsArray != null && tracker.count == 0 && e.message?.contains("400") == true) {
-                loopOpenAiRounds(apiKey, model, messages, temperature, null, EmitTracker())
+                loopOpenAiRounds(apiKey, model, messages, temperature, null, EmitTracker(), emptyList())
             } else throw e
         }
     }
@@ -182,7 +188,8 @@ class SdkProvider(
         messages: MutableList<OpenAiMessage>,
         temperature: Float,
         toolsArray: JsonArray?,
-        tracker: EmitTracker
+        tracker: EmitTracker,
+        tools: List<AiTool>
     ) {
         repeat(MAX_TOOL_ROUNDS) {
             val textAcc = StringBuilder()
@@ -235,9 +242,9 @@ class SdkProvider(
                 )
             )
             calls.forEach { c ->
-                emit(AiStreamEvent.ToolStarted(c.name, toolLabel(c.name), c.argsJson))
-                val out = runTool(c)
-                emit(AiStreamEvent.Tool(c.name, toolLabel(c.name), c.argsJson, out.text, out.durationMs))
+                emit(AiStreamEvent.ToolStarted(c.name, toolLabel(c.name, tools), c.argsJson))
+                val out = runTool(c, tools)
+                emit(AiStreamEvent.Tool(c.name, toolLabel(c.name, tools), c.argsJson, out.text, out.durationMs))
                 messages.add(OpenAiMessage(role = "tool", content = out.text, toolCallId = c.id))
             }
         }
@@ -249,12 +256,13 @@ class SdkProvider(
         model: String,
         history: List<ChatTurn>,
         systemPrompt: String?,
-        temperature: Float
+        temperature: Float,
+        tools: List<AiTool>
     ) {
         val messages = mutableListOf<AnthropicMessage>().apply {
             history.forEach { add(AnthropicMessage(anthropicRole(it.role), JsonPrimitive(it.text))) }
         }
-        val toolsArray = if (tools.isEmpty()) null else anthropicToolsArray()
+        val toolsArray = if (tools.isEmpty()) null else anthropicToolsArray(tools)
         repeat(MAX_TOOL_ROUNDS) {
             val textAcc = StringBuilder()
             val toolAcc = AnthropicToolAcc()
@@ -289,10 +297,10 @@ class SdkProvider(
             if (calls.isEmpty()) return
             val results = mutableMapOf<String, ToolOutcome>()
             calls.forEach { c ->
-                emit(AiStreamEvent.ToolStarted(c.name, toolLabel(c.name), c.argsJson))
-                val out = runTool(c)
+                emit(AiStreamEvent.ToolStarted(c.name, toolLabel(c.name, tools), c.argsJson))
+                val out = runTool(c, tools)
                 results[c.id] = out
-                emit(AiStreamEvent.Tool(c.name, toolLabel(c.name), c.argsJson, out.text, out.durationMs))
+                emit(AiStreamEvent.Tool(c.name, toolLabel(c.name, tools), c.argsJson, out.text, out.durationMs))
             }
             messages.add(
                 AnthropicMessage(
@@ -335,7 +343,7 @@ class SdkProvider(
     // ── Tool plumbing ────────────────────────────────────────────────
     private data class ToolOutcome(val text: String, val durationMs: Long)
 
-    private suspend fun runTool(call: ResolvedToolCall): ToolOutcome {
+    private suspend fun runTool(call: ResolvedToolCall, tools: List<AiTool>): ToolOutcome {
         val tool = tools.find { it.name == call.name }
         if (tool == null) return ToolOutcome("Error: unknown tool '${call.name}'", 0)
         val start = System.currentTimeMillis()
@@ -349,10 +357,10 @@ class SdkProvider(
         }
     }
 
-    private fun toolLabel(name: String): String =
+    private fun toolLabel(name: String, tools: List<AiTool>): String =
         tools.find { it.name == name }?.displayName ?: name
 
-    private fun openAiToolsArray(): JsonArray = buildJsonArray {
+    private fun openAiToolsArray(tools: List<AiTool>): JsonArray = buildJsonArray {
         tools.forEach { t ->
             addJsonObject {
                 put("type", "function")
@@ -365,7 +373,7 @@ class SdkProvider(
         }
     }
 
-    private fun anthropicToolsArray(): JsonArray = buildJsonArray {
+    private fun anthropicToolsArray(tools: List<AiTool>): JsonArray = buildJsonArray {
         tools.forEach { t ->
             addJsonObject {
                 put("name", t.name)

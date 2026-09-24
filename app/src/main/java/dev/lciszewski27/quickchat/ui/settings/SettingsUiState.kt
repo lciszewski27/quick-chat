@@ -2,6 +2,8 @@ package dev.lciszewski27.quickchat.ui.settings
 
 import dev.lciszewski27.quickchat.domain.model.AiModelInfo
 import dev.lciszewski27.quickchat.domain.model.FavoriteModel
+import dev.lciszewski27.quickchat.domain.model.SecretDecl
+import dev.lciszewski27.quickchat.domain.model.Skill
 
 data class SettingsUiState(
     // Appearance (copied from reference)
@@ -26,6 +28,17 @@ data class SettingsUiState(
     val showAddProvider: Boolean = false,
     val editingProviderId: String? = null,
     val confirmDeleteProviderId: String? = null,
+    // Skills
+    val skills: List<Skill> = emptyList(),
+    val showNewSkill: Boolean = false,
+    val editingSkillId: String? = null,
+    val confirmDeleteSkillId: String? = null,
+    val testingSkillId: String? = null,
+    val testArgs: String = "{}",
+    val testRunning: Boolean = false,
+    val testResult: String? = null,
+    val secretsSkillId: String? = null,
+    val secretValues: Map<String, String> = emptyMap(),
     val temperature: Float = 0.7f,
     val systemPrompt: String = ""
 )
@@ -93,6 +106,32 @@ sealed interface SettingsUiEvent {
     data class FetchModels(val instanceId: String) : SettingsUiEvent
     data class ToggleFavorite(val instanceId: String, val model: AiModelInfo) : SettingsUiEvent
     data class SelectModel(val instanceId: String, val modelId: String) : SettingsUiEvent
+    // Skills
+    data object ShowNewSkill : SettingsUiEvent
+    data class ShowEditSkill(val skillId: String) : SettingsUiEvent
+    data object DismissSkillEditor : SettingsUiEvent
+    data class SaveSkill(
+        val skillId: String?,
+        val name: String,
+        val description: String,
+        val paramsSchema: String,
+        val code: String
+    ) : SettingsUiEvent
+    data class RequestDeleteSkill(val skillId: String) : SettingsUiEvent
+    data object DismissDeleteSkill : SettingsUiEvent
+    data object ConfirmDeleteSkill : SettingsUiEvent
+    data class ToggleSkillEnabled(val skillId: String, val enabled: Boolean) : SettingsUiEvent
+    data class ShowSkillTest(val skillId: String) : SettingsUiEvent
+    data object DismissSkillTest : SettingsUiEvent
+    data class SetSkillTestArgs(val args: String) : SettingsUiEvent
+    data object RunSkillTest : SettingsUiEvent
+    data class ShowSkillSecrets(val skillId: String) : SettingsUiEvent
+    data object DismissSkillSecrets : SettingsUiEvent
+    data class SaveSkillSecrets(
+        val skillId: String,
+        val decls: List<SecretDecl>,
+        val values: Map<String, String>
+    ) : SettingsUiEvent
     // General
     data class SetTemperature(val value: Float) : SettingsUiEvent
     data class SetSystemPrompt(val value: String) : SettingsUiEvent

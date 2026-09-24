@@ -58,6 +58,15 @@ class AiToolsTest {
     }
 
     @Test
+    fun jsTool_supportsTopLevelReturn() = runBlocking {
+        val js = JsTool()
+        // Regression: models end snippets with `return value`, which is a
+        // SyntaxError in a bare script ("return not in a function").
+        assertEquals("42", js.execute("""{"code":"const x = 40 + 2; return x;"}"""))
+        assertEquals("7", js.execute("""{"code":"function f(a, b) { return a * b; } return f(3.5, 2);"}"""))
+    }
+
+    @Test
     fun jsTool_exposesHelpersAndNoFetch() = runBlocking {
         val js = JsTool()
         assertEquals("hi", js.execute("""{"code":"base64Decode(base64Encode('hi'))"}"""))

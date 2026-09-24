@@ -10,11 +10,15 @@ import dev.lciszewski27.quickchat.data.local.dao.ChatMessageDao
 import dev.lciszewski27.quickchat.data.local.dao.ChatSessionDao
 import dev.lciszewski27.quickchat.data.local.dao.FavoriteModelDao
 import dev.lciszewski27.quickchat.data.local.dao.ProviderInstanceDao
+import dev.lciszewski27.quickchat.data.local.dao.SkillDao
+import dev.lciszewski27.quickchat.data.local.dao.SkillSecretDao
 import dev.lciszewski27.quickchat.data.local.dao.ToolCallDao
 import dev.lciszewski27.quickchat.data.local.entity.ChatMessageEntity
 import dev.lciszewski27.quickchat.data.local.entity.ChatSessionEntity
 import dev.lciszewski27.quickchat.data.local.entity.FavoriteModelEntity
 import dev.lciszewski27.quickchat.data.local.entity.ProviderInstanceEntity
+import dev.lciszewski27.quickchat.data.local.entity.SkillEntity
+import dev.lciszewski27.quickchat.data.local.entity.SkillSecretEntity
 import dev.lciszewski27.quickchat.data.local.entity.ToolCallEntity
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -49,15 +53,39 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Skills + secret values are new tables; everything else untouched.
+        // Secret values live in their own table so tool definitions
+        // (built from `skills` only) can never leak them to the model.
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `skills` (" +
+                "`id` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                "`toolName` TEXT NOT NULL, `description` TEXT NOT NULL, " +
+                "`code` TEXT NOT NULL, `paramsSchema` TEXT NOT NULL, " +
+                "`secretsSchema` TEXT NOT NULL, `enabled` INTEGER NOT NULL, " +
+                "`tested` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `skill_secrets` (" +
+                "`skillId` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                "`value` TEXT NOT NULL, PRIMARY KEY(`skillId`, `name`))"
+        )
+    }
+}
+
 @Database(
     entities = [
         ChatSessionEntity::class,
         ChatMessageEntity::class,
         FavoriteModelEntity::class,
         ProviderInstanceEntity::class,
-        ToolCallEntity::class
+        ToolCallEntity::class,
+        SkillEntity::class,
+        SkillSecretEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -66,6 +94,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteModelDao(): FavoriteModelDao
     abstract fun providerInstanceDao(): ProviderInstanceDao
     abstract fun toolCallDao(): ToolCallDao
+    abstract fun skillDao(): SkillDao
+    abstract fun skillSecretDao(): SkillSecretDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -76,7 +106,8 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "quickchat.db"
-                )                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                )
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigration(false).build().also { INSTANCE = it }
             }
         }

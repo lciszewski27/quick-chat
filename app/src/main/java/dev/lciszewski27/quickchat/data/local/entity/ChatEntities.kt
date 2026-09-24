@@ -58,3 +58,27 @@ data class ToolCallEntity(
     val durationMs: Long,
     val timestamp: Long
 )
+
+/** A persisted user skill (code + schemas). Secret values live separately. */
+@Entity(tableName = "skills")
+data class SkillEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val toolName: String,
+    val description: String,
+    val code: String,
+    val paramsSchema: String,
+    val secretsSchema: String,
+    val enabled: Boolean,
+    val tested: Boolean,
+    val createdAt: Long,
+    val updatedAt: Long
+)
+
+/** Secret values, keyed per skill. Never included in model-facing definitions. */
+@Entity(tableName = "skill_secrets", primaryKeys = ["skillId", "name"])
+data class SkillSecretEntity(
+    val skillId: String,
+    val name: String,
+    val value: String
+)

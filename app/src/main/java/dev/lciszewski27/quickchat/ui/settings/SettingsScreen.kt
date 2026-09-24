@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
@@ -45,6 +46,7 @@ import dev.lciszewski27.quickchat.ui.settings.pages.AppearanceSettingsPage
 import dev.lciszewski27.quickchat.ui.settings.pages.GeneralSettingsPage
 import dev.lciszewski27.quickchat.ui.settings.pages.ModelsSettingsPage
 import dev.lciszewski27.quickchat.ui.settings.pages.ProvidersSettingsPage
+import dev.lciszewski27.quickchat.ui.settings.pages.SkillsSettingsPage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,6 +73,7 @@ fun SettingsScreen(
                             SettingsPage.APPEARANCE -> "Appearance"
                             SettingsPage.PROVIDERS -> "Providers & Keys"
                             SettingsPage.MODELS -> "Models & Favorites"
+                            SettingsPage.SKILLS -> "Skills"
                             SettingsPage.GENERAL -> "General"
                             SettingsPage.ABOUT -> "About"
                         },
@@ -116,6 +119,10 @@ fun SettingsScreen(
                         onEvent = onEvent,
                         onEnsureModels = onEnsureModels
                     )
+                    SettingsPage.SKILLS -> SkillsSettingsPage(
+                        uiState = uiState,
+                        onEvent = onEvent
+                    )
                     SettingsPage.GENERAL -> GeneralSettingsPage(uiState, onEvent)
                     SettingsPage.ABOUT -> AboutSettingsPage()
                 }
@@ -141,6 +148,12 @@ private fun MainSettingsPage(onNavigate: (SettingsPage) -> Unit) {
                         "Fetch catalog, star favorites",
                         Icons.Filled.SmartToy,
                         SettingsPage.MODELS
+                    ),
+                    SettingsItem(
+                        "Skills",
+                        "AI-created JavaScript tools",
+                        Icons.Filled.Extension,
+                        SettingsPage.SKILLS
                     ),
                     SettingsItem(
                         "General",

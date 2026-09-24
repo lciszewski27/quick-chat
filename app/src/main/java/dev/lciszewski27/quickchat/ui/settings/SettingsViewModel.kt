@@ -4,9 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.lciszewski27.quickchat.data.ai.ProviderResolver
 import dev.lciszewski27.quickchat.data.ai.Providers
+import dev.lciszewski27.quickchat.data.ai.skills.SkillExecutor
+import dev.lciszewski27.quickchat.data.ai.skills.SkillValidation
 import dev.lciszewski27.quickchat.data.local.preferences.UserPreferencesDataStore
 import dev.lciszewski27.quickchat.domain.model.FavoriteModel
 import dev.lciszewski27.quickchat.domain.model.ProviderInstance
+import dev.lciszewski27.quickchat.domain.model.Skill
 import dev.lciszewski27.quickchat.domain.repository.ChatRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,7 +23,8 @@ import java.util.UUID
 class SettingsViewModel(
     private val preferences: UserPreferencesDataStore,
     private val repository: ChatRepository,
-    private val resolver: ProviderResolver
+    private val resolver: ProviderResolver,
+    private val skillExecutor: SkillExecutor
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -40,7 +44,8 @@ class SettingsViewModel(
                 preferences.temperature,
                 preferences.systemPrompt,
                 repository.observeProviderInstances(),
-                repository.observeFavorites()
+                repository.observeFavorites(),
+                repository.observeSkills()
             ) { flows: Array<Any> ->
                 @Suppress("UNCHECKED_CAST")
                 SettingsSnapshot(
@@ -55,7 +60,8 @@ class SettingsViewModel(
                     temp = flows[8] as Float,
                     sys = flows[9] as String,
                     instances = flows[10] as List<ProviderInstance>,
-                    favs = flows[11] as List<FavoriteModel>
+                    favs = flows[11] as List<FavoriteModel>,
+                    skills = flows[12] as List<Skill>
                 )
             }.collect { snap ->
                 _uiState.update { s ->
@@ -76,6 +82,7 @@ class SettingsViewModel(
                         temperature = snap.temp,
                         systemPrompt = snap.sys,
                         favorites = snap.favs,
+                        skills = snap.skills,
                         providers = snap.instances.map { inst ->
                             val preset = resolver.presetFor(inst.type)
                             ProviderInstanceUi(
@@ -218,6 +225,59 @@ class SettingsViewModel(
                 preferences.setSelectedProvider(event.instanceId)
                 preferences.setSelectedModel(event.modelId)
             }
+            SettingsUiEvent.ShowNewSkill -> _uiState.update {
+                it.copy(showNewSkill = true, editingSkillId = null)
+            }
+            is SettingsUiEvent.ShowEditSkill -> _uiState.update {
+                it.copy(editingSkillId = event.skillId, showNewSkill = false)
+            }
+            SettingsUiEvent.DismissSkillEditor -> _uiState.update {
+                it.copy(showNewSkill = false, editingSkillId = null)
+            }
+            is SettingsUiEvent.SaveSkill -> viewModelScope.launch {
+                saveSkill(event)
+            }
+            is SettingsUiEvent.RequestDeleteSkill -> _uiState.update {
+                it.copy(confirmDeleteSkillId = event.skillId)
+            }
+            SettingsUiEvent.DismissDeleteSkill -> _uiState.update {
+                it.copy(confirmDeleteSkillId = null)
+            }
+            SettingsUiEvent.ConfirmDeleteSkill -> viewModelScope.launch {
+                val id = _uiState.value.confirmDeleteSkillId ?: return@launch
+                repository.deleteSkill(id)
+                _uiState.update {
+                    it.copy(
+                        confirmDeleteSkillId = null,
+                        editingSkillId = null,
+                        testingSkillId = null,
+                        secretsSkillId = null
+                    )
+                }
+            }
+            is SettingsUiEvent.ToggleSkillEnabled -> viewModelScope.launch {
+                repository.setSkillEnabled(event.skillId, event.enabled)
+            }
+            is SettingsUiEvent.ShowSkillTest -> _uiState.update {
+                it.copy(testingSkillId = event.skillId, testArgs = "{}", testResult = null)
+            }
+            SettingsUiEvent.DismissSkillTest -> _uiState.update {
+                it.copy(testingSkillId = null, testArgs = "{}", testResult = null, testRunning = false)
+            }
+            is SettingsUiEvent.SetSkillTestArgs -> _uiState.update {
+                it.copy(testArgs = event.args)
+            }
+            SettingsUiEvent.RunSkillTest -> runSkillTest()
+            is SettingsUiEvent.ShowSkillSecrets -> viewModelScope.launch {
+                val values = repository.getSecretValues(event.skillId)
+                _uiState.update { it.copy(secretsSkillId = event.skillId, secretValues = values) }
+            }
+            SettingsUiEvent.DismissSkillSecrets -> _uiState.update {
+                it.copy(secretsSkillId = null, secretValues = emptyMap())
+            }
+            is SettingsUiEvent.SaveSkillSecrets -> viewModelScope.launch {
+                saveSkillSecrets(event)
+            }
             is SettingsUiEvent.SetTemperature -> viewModelScope.launch {
                 preferences.setTemperature(event.value)
             }
@@ -227,8 +287,94 @@ class SettingsViewModel(
         }
     }
 
-    private fun fetchModels(instanceId: String) {
+    private fun saveSkill(event: SettingsUiEvent.SaveSkill) {
         viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            if (event.skillId != null) {
+                val current = repository.getSkill(event.skillId) ?: return@launch
+                val params = SkillValidation.normalizeParamsSchema(event.paramsSchema)
+                    .getOrElse { return@launch }
+                repository.upsertSkill(
+                    current.copy(
+                        name = event.name.ifBlank { current.name },
+                        description = event.description,
+                        paramsSchema = params,
+                        code = event.code.ifBlank { current.code },
+                        // Editing code invalidates the previous pass: re-test to reactivate.
+                        tested = if (event.code != current.code) false else current.tested,
+                        enabled = if (event.code != current.code) false else current.enabled,
+                        updatedAt = now
+                    )
+                )
+            } else {
+                if (event.name.isBlank() || event.code.isBlank()) return@launch
+                val params = SkillValidation.normalizeParamsSchema(event.paramsSchema)
+                    .getOrElse { return@launch }
+                val taken = repository.observeSkills().first().map { it.toolName }.toSet()
+                val toolName = SkillValidation.ensureUnique(
+                    SkillValidation.sanitizeToolName(event.name), taken
+                )
+                repository.upsertSkill(
+                    Skill(
+                        id = UUID.randomUUID().toString(),
+                        name = event.name.take(SkillValidation.MAX_NAME_CHARS),
+                        toolName = toolName,
+                        description = event.description,
+                        code = event.code,
+                        paramsSchema = params,
+                        secrets = emptyList(),
+                        enabled = false,
+                        tested = false,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                )
+            }
+            _uiState.update { it.copy(showNewSkill = false, editingSkillId = null) }
+        }
+    }
+
+    private fun runSkillTest() {
+        viewModelScope.launch {
+            val id = _uiState.value.testingSkillId ?: return@launch
+            val skill = repository.getSkill(id) ?: return@launch
+            _uiState.update { it.copy(testRunning = true, testResult = null) }
+            // Real stored secrets are used: this is the gate that proves the
+            // skill works as the model will call it.
+            val secrets = repository.getSecretValues(id)
+                .filterKeys { name -> skill.secrets.any { it.name == name } }
+            val outcome = skillExecutor.trialRun(skill.code, _uiState.value.testArgs, secrets)
+            if (!outcome.startsWith("Error")) {
+                repository.setSkillTested(id, true)
+                repository.setSkillEnabled(id, true)
+            }
+            _uiState.update { it.copy(testRunning = false, testResult = outcome) }
+        }
+    }
+
+    private fun saveSkillSecrets(event: SettingsUiEvent.SaveSkillSecrets) {
+        viewModelScope.launch {
+            val skill = repository.getSkill(event.skillId) ?: return@launch
+            // Persist declarations on the skill row…
+            repository.upsertSkill(skill.copy(secrets = event.decls, updatedAt = System.currentTimeMillis()))
+            // …values in their own table, then prune values whose
+            // declaration was removed.
+            event.values.forEach { (name, value) ->
+                if (event.decls.any { it.name == name }) {
+                    repository.setSecretValue(event.skillId, name, value)
+                }
+            }
+            val current = repository.getSecretValues(event.skillId)
+            current.keys.forEach { name ->
+                if (event.decls.none { it.name == name }) {
+                    repository.deleteSecretValue(event.skillId, name)
+                }
+            }
+            _uiState.update { it.copy(secretsSkillId = null, secretValues = emptyMap()) }
+        }
+    }
+
+    private fun fetchModels(instanceId: String) {        viewModelScope.launch {
             val instance = repository.observeProviderInstances().first()
                 .find { it.instanceId == instanceId } ?: return@launch
             _uiState.update { it.copy(isFetchingModels = true, fetchError = null, fetchingProviderId = instanceId) }
@@ -270,6 +416,7 @@ class SettingsViewModel(
         val temp: Float,
         val sys: String,
         val instances: List<ProviderInstance>,
-        val favs: List<FavoriteModel>
+        val favs: List<FavoriteModel>,
+        val skills: List<Skill>
     )
 }

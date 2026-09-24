@@ -4,6 +4,7 @@ import dev.lciszewski27.quickchat.domain.model.ChatMessage
 import dev.lciszewski27.quickchat.domain.model.ChatSession
 import dev.lciszewski27.quickchat.domain.model.FavoriteModel
 import dev.lciszewski27.quickchat.domain.model.ProviderInstance
+import dev.lciszewski27.quickchat.domain.model.Skill
 import dev.lciszewski27.quickchat.domain.model.ToolCallRecord
 import kotlinx.coroutines.flow.Flow
 
@@ -36,4 +37,14 @@ interface ChatRepository {
         result: String,
         durationMs: Long
     ): ToolCallRecord
+
+    fun observeSkills(): Flow<List<Skill>>
+    suspend fun getSkill(id: String): Skill?
+    suspend fun upsertSkill(skill: Skill)
+    suspend fun deleteSkill(id: String)
+    suspend fun setSkillEnabled(id: String, enabled: Boolean)
+    suspend fun setSkillTested(id: String, tested: Boolean)
+    suspend fun getSecretValues(skillId: String): Map<String, String>
+    suspend fun setSecretValue(skillId: String, name: String, value: String)
+    suspend fun deleteSecretValue(skillId: String, name: String)
 }

@@ -4,21 +4,28 @@ import dev.lciszewski27.quickchat.data.local.dao.ChatMessageDao
 import dev.lciszewski27.quickchat.data.local.dao.ChatSessionDao
 import dev.lciszewski27.quickchat.data.local.dao.FavoriteModelDao
 import dev.lciszewski27.quickchat.data.local.dao.ProviderInstanceDao
+import dev.lciszewski27.quickchat.data.local.dao.SkillDao
+import dev.lciszewski27.quickchat.data.local.dao.SkillSecretDao
 import dev.lciszewski27.quickchat.data.local.dao.ToolCallDao
 import dev.lciszewski27.quickchat.data.local.entity.ChatMessageEntity
 import dev.lciszewski27.quickchat.data.local.entity.ChatSessionEntity
 import dev.lciszewski27.quickchat.data.local.entity.FavoriteModelEntity
 import dev.lciszewski27.quickchat.data.local.entity.ProviderInstanceEntity
+import dev.lciszewski27.quickchat.data.local.entity.SkillEntity
+import dev.lciszewski27.quickchat.data.local.entity.SkillSecretEntity
 import dev.lciszewski27.quickchat.data.local.entity.ToolCallEntity
 import dev.lciszewski27.quickchat.domain.model.ChatMessage
 import dev.lciszewski27.quickchat.domain.model.ChatRole
 import dev.lciszewski27.quickchat.domain.model.ChatSession
 import dev.lciszewski27.quickchat.domain.model.FavoriteModel
 import dev.lciszewski27.quickchat.domain.model.ProviderInstance
+import dev.lciszewski27.quickchat.domain.model.SecretDecl
+import dev.lciszewski27.quickchat.domain.model.Skill
 import dev.lciszewski27.quickchat.domain.model.ToolCallRecord
 import dev.lciszewski27.quickchat.domain.repository.ChatRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
 import java.util.UUID
 
 class ChatRepositoryImpl(
@@ -26,7 +33,9 @@ class ChatRepositoryImpl(
     private val messageDao: ChatMessageDao,
     private val favoriteDao: FavoriteModelDao,
     private val providerDao: ProviderInstanceDao,
-    private val toolCallDao: ToolCallDao
+    private val toolCallDao: ToolCallDao,
+    private val skillDao: SkillDao,
+    private val skillSecretDao: SkillSecretDao
 ) : ChatRepository {
 
     override fun observeSessions(): Flow<List<ChatSession>> =
@@ -182,4 +191,74 @@ class ChatRepositoryImpl(
         try { ChatRole.valueOf(role) } catch (e: Exception) { ChatRole.USER },
         text, timestamp, isError
     )
+
+    // ── Skills ───────────────────────────────────────────────────────
+    private val skillJson = Json { ignoreUnknownKeys = true }
+
+    override fun observeSkills(): Flow<List<Skill>> =
+        skillDao.observe().map { list -> list.map { it.toDomain() } }
+
+    override suspend fun getSkill(id: String): Skill? =
+        skillDao.get(id)?.toDomain()
+
+    override suspend fun upsertSkill(skill: Skill) {
+        val now = System.currentTimeMillis()
+        skillDao.upsert(
+            SkillEntity(
+                id = skill.id,
+                name = skill.name,
+                toolName = skill.toolName,
+                description = skill.description,
+                code = skill.code,
+                paramsSchema = skill.paramsSchema,
+                secretsSchema = skillJson.encodeToString(
+                    kotlinx.serialization.builtins.ListSerializer(SecretDecl.serializer()),
+                    skill.secrets
+                ),
+                enabled = skill.enabled,
+                tested = skill.tested,
+                createdAt = if (skill.createdAt == 0L) now else skill.createdAt,
+                updatedAt = now
+            )
+        )
+    }
+
+    override suspend fun deleteSkill(id: String) {
+        skillSecretDao.deleteBySkill(id)
+        skillDao.delete(id)
+    }
+
+    override suspend fun setSkillEnabled(id: String, enabled: Boolean) {
+        skillDao.setEnabled(id, enabled)
+    }
+
+    override suspend fun setSkillTested(id: String, tested: Boolean) {
+        skillDao.setTested(id, tested)
+    }
+
+    override suspend fun getSecretValues(skillId: String): Map<String, String> =
+        skillSecretDao.forSkill(skillId).associate { it.name to it.value }
+
+    override suspend fun setSecretValue(skillId: String, name: String, value: String) {
+        skillSecretDao.upsert(SkillSecretEntity(skillId, name, value))
+    }
+
+    override suspend fun deleteSecretValue(skillId: String, name: String) {
+        skillSecretDao.delete(skillId, name)
+    }
+
+    private fun SkillEntity.toDomain(): Skill {
+        val secrets = try {
+            skillJson.decodeFromString(
+                kotlinx.serialization.builtins.ListSerializer(SecretDecl.serializer()),
+                secretsSchema.ifBlank { "[]" }
+            )
+        } catch (e: Exception) {
+            emptyList()
+        }
+        return Skill(
+            id, name, toolName, description, code, paramsSchema,
+            secrets, enabled, tested, createdAt, updatedAt
+        )
+    }
 }

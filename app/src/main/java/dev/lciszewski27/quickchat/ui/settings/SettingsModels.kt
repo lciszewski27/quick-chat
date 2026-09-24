@@ -3,7 +3,7 @@ package dev.lciszewski27.quickchat.ui.settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
 internal enum class SettingsPage {
-    MAIN, APPEARANCE, PROVIDERS, MODELS, GENERAL, ABOUT
+    MAIN, APPEARANCE, PROVIDERS, MODELS, SKILLS, GENERAL, ABOUT
 }
 
 internal data class SettingsGroup(val items: List<SettingsItem>)

@@ -8,6 +8,8 @@ import dev.lciszewski27.quickchat.data.local.entity.ChatMessageEntity
 import dev.lciszewski27.quickchat.data.local.entity.ChatSessionEntity
 import dev.lciszewski27.quickchat.data.local.entity.FavoriteModelEntity
 import dev.lciszewski27.quickchat.data.local.entity.ProviderInstanceEntity
+import dev.lciszewski27.quickchat.data.local.entity.SkillEntity
+import dev.lciszewski27.quickchat.data.local.entity.SkillSecretEntity
 import dev.lciszewski27.quickchat.data.local.entity.ToolCallEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -102,4 +104,43 @@ interface ToolCallDao {
 
     @Query("DELETE FROM tool_calls WHERE sessionId = :sessionId")
     suspend fun deleteBySession(sessionId: String)
+}
+
+@Dao
+interface SkillDao {
+    @Query("SELECT * FROM skills ORDER BY createdAt ASC")
+    fun observe(): Flow<List<SkillEntity>>
+
+    @Query("SELECT * FROM skills WHERE id = :id LIMIT 1")
+    suspend fun get(id: String): SkillEntity?
+
+    @Query("SELECT * FROM skills WHERE toolName = :toolName LIMIT 1")
+    suspend fun getByToolName(toolName: String): SkillEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(skill: SkillEntity)
+
+    @Query("UPDATE skills SET enabled = :enabled WHERE id = :id")
+    suspend fun setEnabled(id: String, enabled: Boolean)
+
+    @Query("UPDATE skills SET tested = :tested WHERE id = :id")
+    suspend fun setTested(id: String, tested: Boolean)
+
+    @Query("DELETE FROM skills WHERE id = :id")
+    suspend fun delete(id: String)
+}
+
+@Dao
+interface SkillSecretDao {
+    @Query("SELECT * FROM skill_secrets WHERE skillId = :skillId")
+    suspend fun forSkill(skillId: String): List<SkillSecretEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(secret: SkillSecretEntity)
+
+    @Query("DELETE FROM skill_secrets WHERE skillId = :skillId AND name = :name")
+    suspend fun delete(skillId: String, name: String)
+
+    @Query("DELETE FROM skill_secrets WHERE skillId = :skillId")
+    suspend fun deleteBySkill(skillId: String)
 }

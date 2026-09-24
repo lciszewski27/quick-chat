@@ -58,5 +58,4 @@ data class ToolCallRecord(
     val durationMs: Long,
     val timestamp: Long
 )
-
 data class ChatTurn(val role: String, val text: String)

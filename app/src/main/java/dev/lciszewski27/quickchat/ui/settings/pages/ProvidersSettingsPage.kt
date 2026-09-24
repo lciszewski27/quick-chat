@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
@@ -25,6 +26,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -86,6 +88,7 @@ internal fun ProvidersSettingsPage(
             uiState.providers.forEach { provider ->
                 ProviderCard(
                     item = provider,
+                    aiCoreStatus = if (provider.type == Providers.aicore.id) uiState.aiCoreStatus else null,
                     onEvent = onEvent
                 )
             }
@@ -95,6 +98,7 @@ internal fun ProvidersSettingsPage(
     if (uiState.showAddProvider) {
         AddProviderDialog(
             addedTypes = uiState.providers.filterNot { it.isCustom }.map { it.type }.toSet(),
+            aiCoreStatus = uiState.aiCoreStatus,
             onDismiss = { onEvent(SettingsUiEvent.DismissAddProvider) },
             onAdd = { type, label, baseUrl, apiKey ->
                 onEvent(SettingsUiEvent.AddProvider(type, label, baseUrl, apiKey))
@@ -134,7 +138,8 @@ internal fun ProvidersSettingsPage(
 @Composable
 private fun ProviderCard(
     item: ProviderInstanceUi,
-    onEvent: (SettingsUiEvent) -> Unit
+    onEvent: (SettingsUiEvent) -> Unit,
+    aiCoreStatus: dev.lciszewski27.quickchat.data.ai.AiCoreStatus? = null
 ) {
     val uriHandler = LocalUriHandler.current
     val preset = remember(item.type) { Providers.preset(item.type) }
@@ -153,7 +158,8 @@ private fun ProviderCard(
                         buildString {
                             append(item.typeDisplay)
                             if (item.isCustom && item.baseUrl.isNotBlank()) append(" • ${item.baseUrl}")
-                            if (item.apiKey.isBlank()) append(" • no key") else append(" • key saved")
+                            if (!item.requiresKey) append(" • on-device")
+                            else if (item.apiKey.isBlank()) append(" • no key") else append(" • key saved")
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -183,40 +189,48 @@ private fun ProviderCard(
                 }
             }
         )
-        // Row 1: API key
-        SegmentedListItem(
-            shapes = ListItemDefaults.segmentedShapes(index = 1, count = 3),
-            colors = ListItemDefaults.colors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-            ),
-            leadingContent = { Text("API key") },
-            content = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = item.apiKey,
-                        onValueChange = { onEvent(SettingsUiEvent.SetProviderApiKey(item.instanceId, it)) },
-                        placeholder = { Text(preset?.apiKeyHint.orEmpty()) },
-                        singleLine = true,
-                        shape = MaterialTheme.shapes.medium,
-                        visualTransformation = if (item.apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        trailingIcon = {
-                            IconButton(onClick = { onEvent(SettingsUiEvent.ToggleApiKeyVisibility(item.instanceId)) }) {
-                                Icon(
-                                    if (item.apiKeyVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                    contentDescription = if (item.apiKeyVisible) "Hide key" else "Show key"
-                                )
-                            }
-                        },
-                        leadingIcon = { Icon(Icons.Filled.Key, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (!preset?.helpUrl.isNullOrBlank()) {
-                        TextButton(onClick = { uriHandler.openUri(preset!!.helpUrl) }) { Text("Get an API key") }
+        // Row 1: API key — or on-device model status for keyless backends.
+        if (!item.requiresKey) {
+            AiCoreStatusRow(
+                status = aiCoreStatus,
+                onDownload = { onEvent(SettingsUiEvent.DownloadAiCoreModel) },
+                onRetry = { onEvent(SettingsUiEvent.CheckAiCoreStatus) }
+            )
+        } else {
+            SegmentedListItem(
+                shapes = ListItemDefaults.segmentedShapes(index = 1, count = 3),
+                colors = ListItemDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                ),
+                leadingContent = { Text("API key") },
+                content = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = item.apiKey,
+                            onValueChange = { onEvent(SettingsUiEvent.SetProviderApiKey(item.instanceId, it)) },
+                            placeholder = { Text(preset?.apiKeyHint.orEmpty()) },
+                            singleLine = true,
+                            shape = MaterialTheme.shapes.medium,
+                            visualTransformation = if (item.apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            trailingIcon = {
+                                IconButton(onClick = { onEvent(SettingsUiEvent.ToggleApiKeyVisibility(item.instanceId)) }) {
+                                    Icon(
+                                        if (item.apiKeyVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                        contentDescription = if (item.apiKeyVisible) "Hide key" else "Show key"
+                                    )
+                                }
+                            },
+                            leadingIcon = { Icon(Icons.Filled.Key, contentDescription = null) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (!preset?.helpUrl.isNullOrBlank()) {
+                            TextButton(onClick = { uriHandler.openUri(preset!!.helpUrl) }) { Text("Get an API key") }
+                        }
                     }
                 }
-            }
-        )
+            )
+        }
         // Row 2: fetch + use
         SegmentedListItem(
             shapes = ListItemDefaults.segmentedShapes(index = 2, count = 3),
@@ -242,9 +256,77 @@ private fun ProviderCard(
     }
 }
 
+/**
+ * On-device model state in place of the API-key row: status text plus
+ * Download / Retry actions and indeterminate progress while downloading
+ * (AICore doesn't report a total size, so no percentage is shown).
+ */
+@Composable
+private fun AiCoreStatusRow(
+    status: dev.lciszewski27.quickchat.data.ai.AiCoreStatus?,
+    onDownload: () -> Unit,
+    onRetry: () -> Unit
+) {
+    SegmentedListItem(
+        shapes = ListItemDefaults.segmentedShapes(index = 1, count = 3),
+        colors = ListItemDefaults.colors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        leadingContent = { Text("On-device model") },
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val message = when (status) {
+                    null, dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Checking ->
+                        "Checking device support…"
+                    dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Unsupported ->
+                        "Not supported on this device."
+                    dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Downloadable ->
+                        "Supported — model download needed (one-time, large)."
+                    is dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Downloading ->
+                        "Downloading on-device model…"
+                    dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Ready ->
+                        "Ready — private, works offline."
+                    is dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Failed ->
+                        status.message
+                }
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (status is dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Failed)
+                        MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (status is dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Downloading) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                Row {
+                    Spacer(Modifier.weight(1f))
+                    when (status) {
+                        dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Downloadable,
+                        is dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Failed -> {
+                            FilledTonalButton(onClick = onDownload) {
+                                Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Download")
+                            }
+                        }
+                        dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Unsupported,
+                        dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Checking,
+                        null -> {
+                            TextButton(onClick = onRetry) { Text("Recheck") }
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+        }
+    )
+}
+
 @Composable
 private fun AddProviderDialog(
     addedTypes: Set<String>,
+    aiCoreStatus: dev.lciszewski27.quickchat.data.ai.AiCoreStatus,
     onDismiss: () -> Unit,
     onAdd: (type: String, label: String, baseUrl: String, apiKey: String) -> Unit
 ) {
@@ -264,13 +346,17 @@ private fun AddProviderDialog(
                 Text("Type", style = MaterialTheme.typography.labelLarge)
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Providers.presetTypes().forEach { p ->
+                        val aicoreUnsupported = p.id == Providers.aicore.id &&
+                            aiCoreStatus == dev.lciszewski27.quickchat.data.ai.AiCoreStatus.Unsupported
                         FilterChip(
                             selected = type == p.id,
                             onClick = { type = p.id },
+                            enabled = !aicoreUnsupported,
                             label = {
                                 Text(
                                     p.displayName +
-                                        if (p.id != Providers.custom.id && addedTypes.contains(p.id)) " (added)" else ""
+                                        if (p.id != Providers.custom.id && addedTypes.contains(p.id)) " (added)" else "" +
+                                        if (aicoreUnsupported) " (not supported on this device)" else ""
                                 )
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -298,17 +384,25 @@ private fun AddProviderDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    label = { Text(if (isCustom) "API key (optional for local servers)" else "API key") },
-                    placeholder = { Text(preset.apiKeyHint) },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.medium,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (type == Providers.aicore.id) {
+                    Text(
+                        "Runs on-device — no key needed. Download the model after adding.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = apiKey,
+                        onValueChange = { apiKey = it },
+                        label = { Text(if (isCustom) "API key (optional for local servers)" else "API key") },
+                        placeholder = { Text(preset.apiKeyHint) },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 if (alreadyAdded) {
                     Text(
                         "Already added — adding again replaces it.",

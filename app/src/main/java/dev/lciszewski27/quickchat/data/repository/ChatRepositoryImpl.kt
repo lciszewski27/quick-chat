@@ -65,7 +65,9 @@ class ChatRepositoryImpl(
         sessionId: String,
         role: ChatRole,
         text: String,
-        isError: Boolean
+        isError: Boolean,
+        genTokens: Int,
+        genMs: Long
     ): ChatMessage {
         val now = System.currentTimeMillis()
         val entity = ChatMessageEntity(
@@ -74,7 +76,9 @@ class ChatRepositoryImpl(
             role = role.name,
             text = text,
             timestamp = now,
-            isError = isError
+            isError = isError,
+            genTokens = genTokens,
+            genMs = genMs
         )
         messageDao.insert(entity)
         sessionDao.touch(sessionId, now)
@@ -189,7 +193,7 @@ class ChatRepositoryImpl(
     private fun ChatMessageEntity.toDomain() = ChatMessage(
         id, sessionId,
         try { ChatRole.valueOf(role) } catch (e: Exception) { ChatRole.USER },
-        text, timestamp, isError
+        text, timestamp, isError, genTokens, genMs
     )
 
     // ── Skills ───────────────────────────────────────────────────────

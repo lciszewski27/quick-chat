@@ -1,5 +1,6 @@
 package dev.lciszewski27.quickchat.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -20,7 +21,11 @@ data class ChatMessageEntity(
     val role: String,
     val text: String,
     val timestamp: Long,
-    val isError: Boolean = false
+    val isError: Boolean = false,
+    /** Estimated generated tokens (model replies only). Added in v5. */
+    @ColumnInfo(defaultValue = "0") val genTokens: Int = 0,
+    /** Generation wall time ms (model replies only). Added in v5. */
+    @ColumnInfo(defaultValue = "0") val genMs: Long = 0
 )
 
 @Entity(tableName = "favorite_models", primaryKeys = ["providerId", "modelId"])

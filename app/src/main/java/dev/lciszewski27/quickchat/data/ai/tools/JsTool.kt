@@ -22,7 +22,8 @@ class JsTool(
     override val description =
         "Runs a JavaScript snippet in a minimal sandboxed runtime and returns its result " +
             "as text. No fetch, timers, imports, or file access — only standard JS plus " +
-            "three synchronous helpers (return values directly, never use await): " +
+            "three synchronous helpers (return values directly; a stray await " +
+            "before them is ignored): " +
             "base64Encode(text), base64Decode(b64), request(url) for a simple HTTPS GET " +
             "(15s timeout, truncated), and httpRequest(optionsJson) where optionsJson is " +
             "{\"url\":...,\"method\":\"GET|POST|PUT|DELETE|PATCH|HEAD\",\"headers\":{...},\"body\":\"...\"}. " +

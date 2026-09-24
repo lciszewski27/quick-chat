@@ -75,6 +75,16 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Generation stats on messages. Columns carry DEFAULT 0 matching the
+        // entity's @ColumnInfo(defaultValue) — Room validates migrated schemas
+        // exactly, so the default must be declared on both sides.
+        db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `genTokens` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `genMs` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [
         ChatSessionEntity::class,
@@ -85,7 +95,7 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         SkillEntity::class,
         SkillSecretEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -107,7 +117,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "quickchat.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration(false).build().also { INSTANCE = it }
             }
         }

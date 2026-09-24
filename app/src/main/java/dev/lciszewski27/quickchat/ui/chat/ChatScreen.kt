@@ -4,7 +4,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -41,6 +44,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -350,6 +354,7 @@ private fun ChatScaffold(
                     isSending = state.isSending && streamHere,
                     streamingText = if (streamHere) state.streamingText else null,
                     runningToolName = if (streamHere) state.runningTool?.displayName else null,
+                    streamingTps = if (streamHere) state.streamingTps else null,
                     onRetry = { onEvent(ChatUiEvent.Retry) },
                     modifier = Modifier.weight(1f)
                 )
@@ -570,6 +575,7 @@ private fun MessageList(
     isSending: Boolean,
     streamingText: String?,
     runningToolName: String?,
+    streamingTps: Float?,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -590,15 +596,21 @@ private fun MessageList(
     }
     // Stream chunks arrive many times per second: restarting an animated
     // scroll on each one never settles and makes the message flicker.
-    // Instead snap instantly, and only while the user is already at the
-    // bottom (never yank them away from reading history).
+    // Instead snap instantly and keep the fresh bottom edge on screen, so
+    // the view travels with the generated text for the whole stream.
     LaunchedEffect(streamingText?.length) {
         if (streamingText == null) return@LaunchedEffect
-        val info = listState.layoutInfo
-        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@LaunchedEffect
-        if (lastVisible >= info.totalItemsCount - 2) {
-            listState.scrollToItem(info.totalItemsCount - 1)
-        }
+        val total = listState.layoutInfo.totalItemsCount
+        if (total == 0) return@LaunchedEffect
+        listState.scrollToItem((total - 1).coerceAtLeast(0))
+        // scrollToItem pins the item's TOP, but the bubble grows downward —
+        // scroll forward past the overflow so the newest text stays visible.
+        val after = listState.layoutInfo
+        val item = after.visibleItemsInfo.find { it.index == total - 1 }
+            ?: return@LaunchedEffect
+        val viewportEnd = after.viewportSize.height - after.afterContentPadding
+        val overflow = (item.offset + item.size) - viewportEnd
+        if (overflow > 0) listState.scroll { scrollBy(overflow.toFloat()) }
     }
     LazyColumn(
         state = listState,
@@ -622,7 +634,11 @@ private fun MessageList(
         // the layout doesn't jump when the stream is saved to history.
         if (streamingText != null || isSending) {
             item(key = "streaming") {
-                StreamingBubble(text = streamingText.orEmpty(), runningToolName = runningToolName)
+                StreamingBubble(
+                    text = streamingText.orEmpty(),
+                    runningToolName = runningToolName,
+                    tps = streamingTps
+                )
             }
         }
     }
@@ -721,7 +737,7 @@ private fun formatDuration(ms: Long): String =
     if (ms < 1000) "${ms}ms" else "${ms / 1000}.${(ms % 1000) / 100}s"
 
 @Composable
-private fun StreamingBubble(text: String, runningToolName: String?) {
+private fun StreamingBubble(text: String, runningToolName: String?, tps: Float?) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start
@@ -757,6 +773,10 @@ private fun StreamingBubble(text: String, runningToolName: String?) {
                             )
                         }
                     }
+                    if (tps != null) {
+                        Spacer(Modifier.height(4.dp))
+                        TpsCaption(text = formatTps(tps))
+                    }
                 }
             }
         }
@@ -787,14 +807,16 @@ private fun MessageBubble(message: ChatMessage, onRetry: () -> Unit) {
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                         )
                     } else {
-                        MarkdownText(
+                        ModelMessageContent(
                             text = message.text,
+                            genCaption = genCaptionFor(message),
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                         )
                     }
                 }
             }
             // Copy stays on model replies only — user messages need no actions.
+            // Copies the visible reply (thought blocks excluded).
             if (!isUser) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (message.isError) {
@@ -807,7 +829,7 @@ private fun MessageBubble(message: ChatMessage, onRetry: () -> Unit) {
                         TextButton(onClick = onRetry) { Text("Retry") }
                     }
                     IconButton(
-                        onClick = { clipboard.setText(AnnotatedString(message.text)) }
+                        onClick = { clipboard.setText(AnnotatedString(stripThoughts(message.text))) }
                     ) {
                         Icon(
                             Icons.Filled.ContentCopy,
@@ -817,6 +839,98 @@ private fun MessageBubble(message: ChatMessage, onRetry: () -> Unit) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Model reply body: markdown text with `<thought>` blocks collapsed into
+ * expandable sections (same bubble, no extra containers). Replies without
+ * tags render exactly as before. An optional generation-speed caption closes
+ * the bubble when stats were recorded.
+ */
+@Composable
+private fun ModelMessageContent(
+    text: String,
+    genCaption: String?,
+    modifier: Modifier = Modifier
+) {
+    val segments = remember(text) { splitThoughts(text) }
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        segments.forEach { segment ->
+            when (segment) {
+                is MessageSegment.Text -> {
+                    if (segment.text.isNotBlank()) {
+                        MarkdownText(text = segment.text)
+                    }
+                }
+                is MessageSegment.Thought -> ThoughtSection(text = segment.text)
+            }
+        }
+        if (genCaption != null) {
+            TpsCaption(text = genCaption)
+        }
+    }
+}
+
+/** Small right-aligned speed caption at the bottom of a bubble. */
+@Composable
+private fun TpsCaption(text: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun genCaptionFor(message: ChatMessage): String? {
+    if (message.role != ChatRole.MODEL || message.isError) return null
+    val avg = computeTps(message.genTokens, message.genMs) ?: return null
+    return "${formatTps(avg)} avg"
+}
+
+@Composable
+private fun ThoughtSection(text: String) {
+    var expanded by remember(text) { mutableStateOf(false) }
+    Column {
+        Row(
+            modifier = Modifier.clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Filled.Psychology,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = "Thought process",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = if (expanded) "Hide thought process" else "Show thought process",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .background(
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        RoundedCornerShape(2.dp)
+                    )
+                    .padding(start = 8.dp, top = 2.dp, bottom = 2.dp, end = 4.dp)
+            ) {
+                MarkdownText(text = text)
             }
         }
     }

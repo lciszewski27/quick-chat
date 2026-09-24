@@ -36,6 +36,8 @@ interface AiProvider {
     val displayName: String
     val apiKeyHint: String
     val apiKeyHelpUrl: String
+    /** False for keyless backends (on-device). Defaults to true. */
+    val requiresApiKey: Boolean get() = true
     suspend fun listModels(apiKey: String): Result<List<AiModelInfo>>
 
     /**

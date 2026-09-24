@@ -4,6 +4,7 @@ import android.app.Application
 import dev.lciszewski27.quickchat.data.ai.LlmSdk
 import dev.lciszewski27.quickchat.data.ai.ProviderResolver
 import dev.lciszewski27.quickchat.data.ai.skills.CreateSkillTool
+import dev.lciszewski27.quickchat.data.ai.skills.ListSkillsTool
 import dev.lciszewski27.quickchat.data.ai.skills.RepoSkillToolSource
 import dev.lciszewski27.quickchat.data.ai.skills.SkillExecutor
 import dev.lciszewski27.quickchat.data.ai.tools.AiTools
@@ -49,8 +50,8 @@ class QuickChatApp : Application() {
         val staticTools = AiTools.defaults() + CreateSkillTool(
             repository = repository,
             executor = skillExecutor,
-            builtInNames = (AiTools.defaults().map { it.name } + "create_skill").toSet()
-        )
+            builtInNames = (AiTools.defaults().map { it.name } + setOf("create_skill", "list_skills")).toSet()
+        ) + ListSkillsTool(repository)
         providerResolver = ProviderResolver(
             sdk = llmSdk,
             tools = staticTools,

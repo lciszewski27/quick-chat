@@ -17,8 +17,8 @@ android {
         applicationId = "dev.lciszewski27.quickchat"
         minSdk = 31
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = project.findProperty("VERSION_CODE")?.toString()?.toInt() ?: 1
+        versionName = project.findProperty("VERSION_NAME")?.toString() ?: "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -89,6 +89,9 @@ dependencies {
     // No minification is enabled, so no ProGuard keep-rules are needed
     // (only DSL bindings are used, no reflection).
     implementation(libs.quickjs.kt)
+
+    // On-device Gemini Nano via ML Kit GenAI Prompt API (beta).
+    implementation(libs.mlkit.genai.prompt)
 
     // Testing
     testImplementation(libs.junit)

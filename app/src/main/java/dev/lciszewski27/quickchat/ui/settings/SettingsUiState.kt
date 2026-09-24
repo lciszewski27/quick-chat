@@ -1,5 +1,6 @@
 package dev.lciszewski27.quickchat.ui.settings
 
+import dev.lciszewski27.quickchat.data.ai.AiCoreStatus
 import dev.lciszewski27.quickchat.domain.model.AiModelInfo
 import dev.lciszewski27.quickchat.domain.model.FavoriteModel
 import dev.lciszewski27.quickchat.domain.model.SecretDecl
@@ -20,6 +21,7 @@ data class SettingsUiState(
     val providers: List<ProviderInstanceUi> = emptyList(),
     val selectedProviderId: String = "",
     val selectedModelId: String = "",
+    val aiCoreStatus: AiCoreStatus = AiCoreStatus.Checking,
     val favorites: List<FavoriteModel> = emptyList(),
     val fetchedModels: List<AiModelInfo> = emptyList(),
     val isFetchingModels: Boolean = false,
@@ -53,7 +55,8 @@ data class ProviderInstanceUi(
     val apiKey: String = "",
     val apiKeyVisible: Boolean = false,
     val isSelected: Boolean = false,
-    val isCustom: Boolean = false
+    val isCustom: Boolean = false,
+    val requiresKey: Boolean = true
 )
 
 enum class AppFont(val displayName: String, val value: String) {
@@ -104,6 +107,8 @@ sealed interface SettingsUiEvent {
     data object ConfirmDeleteProvider : SettingsUiEvent
     data class SelectProvider(val instanceId: String) : SettingsUiEvent
     data class FetchModels(val instanceId: String) : SettingsUiEvent
+    data object CheckAiCoreStatus : SettingsUiEvent
+    data object DownloadAiCoreModel : SettingsUiEvent
     data class ToggleFavorite(val instanceId: String, val model: AiModelInfo) : SettingsUiEvent
     data class SelectModel(val instanceId: String, val modelId: String) : SettingsUiEvent
     // Skills

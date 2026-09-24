@@ -17,7 +17,11 @@ data class ChatMessage(
     val role: ChatRole,
     val text: String,
     val timestamp: Long,
-    val isError: Boolean = false
+    val isError: Boolean = false,
+    /** Estimated generated tokens (model replies only, 0 = unknown). */
+    val genTokens: Int = 0,
+    /** Generation wall time ms (model replies only, 0 = unknown). */
+    val genMs: Long = 0
 )
 
 data class AiModelInfo(

@@ -65,6 +65,8 @@ class SdkProvider(
                     if (apiKey.isBlank()) emptyList()
                     else fetchAnthropicList(apiKey)
                 }
+                // Unreachable: the resolver routes AICORE to AiCoreProvider.
+                LlmProtocol.AICORE -> error("AICORE must be served by AiCoreProvider")
             }
             Result.success(models)
         } catch (e: Exception) {
@@ -150,6 +152,8 @@ class SdkProvider(
         when (config.protocol) {
             LlmProtocol.OPENAI -> runOpenAiLoop(apiKey, modelId, history, systemPrompt, temp, allTools)
             LlmProtocol.ANTHROPIC -> runAnthropicLoop(apiKey, modelId, history, systemPrompt, temp, allTools)
+            // Unreachable: the resolver routes AICORE to AiCoreProvider.
+            LlmProtocol.AICORE -> error("AICORE must be served by AiCoreProvider")
         }
     }
 

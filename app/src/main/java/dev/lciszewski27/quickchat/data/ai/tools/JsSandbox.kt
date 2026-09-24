@@ -8,11 +8,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -55,12 +51,21 @@ object JsSandbox {
     ): String {
         if (code.isBlank()) return "Error: empty code"
         if (code.length > MAX_CODE_CHARS) return "Error: code too long (max $MAX_CODE_CHARS chars)"
+        // All exposed helpers are synchronous, so `await` before one is a
+        // semantic no-op — but a *syntax* error at top level, which models
+        // write out of habit (`await request(...)`). Strip it (helpers only;
+        // user-defined async code is untouched and still needs its own
+        // async context).
+        val prepared = AWAIT_HELPER_REGEX.replace(code, "")
         return try {
             // Blocking native + HTTP work stays off the main thread; coroutine
             // cancellation (Stop button) interrupts even infinite loops.
             val raw = withContext(Dispatchers.IO) {
                 withTimeout(timeoutMs) {
                     quickJs {
+                        // Native watchdog as well: aborts runaway scripts even
+                        // if coroutine cancellation can't reach the engine.
+                        evaluationTimeoutMillis = timeoutMs
                         function("base64Encode") { a ->
                             base64Encode(a.firstOrNull()?.toString().orEmpty())
                         }
@@ -78,16 +83,22 @@ object JsSandbox {
                         function("httpRequest") { a ->
                             httpFetchOptions(a.firstOrNull()?.toString().orEmpty())
                         }
-                        // Wrapped in a function so a top-level `return` is
-                        // legal. The opening stays on line 1 with no prepended
-                        // newline, so error line numbers still match the
-                        // snippet; the trailing newline terminates a `//` tail.
-                        // `args`/`secrets` are declared outside the wrapper so
-                        // user code (and its functions) can read them.
-                        val script = "var args = (" + args.toString() + ");\n" +
-                            "var secrets = (" + secretsJson(secrets) + ");\n" +
-                            "(function(){" + code + "\n})()"
-                        stringify(evaluate<Any?>(script))
+                        // Everything flows through ONE explicit `return`: the
+                        // engine reliably propagates explicit returns (bare
+                        // expression completions do not), top-level `return`
+                        // in user code stays legal inside the inner wrapper,
+                        // and in-JS stringification handles objects without a
+                        // Kotlin-side type mapper. The prefix adds no newlines
+                        // before user code, so error line numbers still match;
+                        // the trailing newline terminates a trailing `//`.
+                        // `args`/`secrets` live in the outer scope, readable
+                        // from user code and its functions via closure.
+                        val script = "(function(){var args = (" + args.toString() + ");" +
+                            "var secrets = (" + secretsJson(secrets) + ");" +
+                            "var v = (function(){" + prepared + "\n})();" +
+                            "return (typeof v === \"string\") ? v : " +
+                            "(JSON.stringify(v) ?? \"undefined\");})()"
+                        evaluate<String>(script)
                     }
                 }
             }
@@ -172,30 +183,8 @@ object JsSandbox {
     }
 
     // ── Result mapping ───────────────────────────────────────────────
-    private fun stringify(value: Any?): String = when (value) {
-        null -> "null"
-        is String -> value
-        is Number, is Boolean -> value.toString()
-        is Map<*, *> -> toElement(value).toString()
-        is List<*> -> toElement(value).toString()
-        else -> value.toString()
-    }
-
-    private fun toElement(value: Any?): JsonElement = when (value) {
-        null -> JsonNull
-        is String -> JsonPrimitive(value)
-        is Boolean -> JsonPrimitive(value)
-        is Number -> when (value) {
-            is Long, is Int, is Short, is Byte -> JsonPrimitive(value.toLong())
-            else -> JsonPrimitive(value.toDouble())
-        }
-        is Map<*, *> -> buildJsonObject {
-            value.forEach { (k, v) -> put(k.toString(), toElement(v)) }
-        }
-        is List<*> -> buildJsonArray { value.forEach { add(toElement(it)) } }
-        else -> JsonPrimitive(value.toString())
-    }
-
+    // (Results arrive as strings via the wrapper's explicit return —
+    // no Kotlin-side value mapping needed.)
     private fun cap(text: String, max: Int = MAX_RESULT_CHARS): String =
         if (text.length > max) text.take(max) + "\n…[truncated]"
         else text
@@ -203,4 +192,7 @@ object JsSandbox {
     const val MAX_RESPONSE_BYTES = 65536L
     const val MAX_RESULT_CHARS = 8000
     const val MAX_CODE_CHARS = 20000
+
+    private val AWAIT_HELPER_REGEX =
+        Regex("""\bawait\s+(?=(?:base64Encode|base64Decode|request|httpRequest)\s*\()""")
 }

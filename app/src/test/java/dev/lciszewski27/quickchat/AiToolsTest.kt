@@ -8,9 +8,16 @@ import dev.lciszewski27.quickchat.data.ai.tools.JsTool
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.Timeout
 
 class AiToolsTest {
+
+    // Engine-backed tests must never hang the suite: a stuck native
+    // evaluation fails loudly instead of blocking everything behind it.
+    @get:Rule
+    val timeout: Timeout = Timeout.seconds(45)
 
     @Test
     fun registry_hasThreeDistinctTools() {
@@ -55,6 +62,8 @@ class AiToolsTest {
         assertEquals("3", js.execute("""{"code":"1 + 2"}"""))
         assertEquals("9", js.execute("""{"code":"(1+2)*3"}"""))
         assertEquals("{\"a\":1}", js.execute("""{"code":"JSON.stringify({a: 1})"}"""))
+        // Objects are stringified by the wrapper — no explicit call needed.
+        assertEquals("{\"a\":1}", js.execute("""{"code":"return {a: 1}"}"""))
     }
 
     @Test
@@ -64,6 +73,16 @@ class AiToolsTest {
         // SyntaxError in a bare script ("return not in a function").
         assertEquals("42", js.execute("""{"code":"const x = 40 + 2; return x;"}"""))
         assertEquals("7", js.execute("""{"code":"function f(a, b) { return a * b; } return f(3.5, 2);"}"""))
+    }
+
+    @Test
+    fun jsTool_toleratesAwaitBeforeSyncHelpers() = runBlocking {
+        val js = JsTool()
+        // Regression: models write `await request(...)` out of habit, but the
+        // helpers are synchronous — top-level await is a SyntaxError, so the
+        // sandbox strips it (await on a plain value is a no-op anyway).
+        assertEquals("aGk=", js.execute("""{"code":"return await base64Encode('hi')"}"""))
+        assertEquals("hi", js.execute("""{"code":"const r = await base64Decode('aGk='); return r;"}"""))
     }
 
     @Test

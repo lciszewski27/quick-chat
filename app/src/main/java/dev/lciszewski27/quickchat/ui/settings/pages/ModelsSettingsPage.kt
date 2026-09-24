@@ -105,6 +105,8 @@ internal fun ModelsSettingsPage(
                 Text(
                     when {
                         instance == null -> ""
+                        !instance.requiresKey && fetched.isEmpty() ->
+                            "Download the on-device model in Providers & Keys, then fetch."
                         instance.apiKey.isBlank() && !instance.isCustom ->
                             "No API key — add one in Providers & Keys, then fetch."
                         fetched.isNotEmpty() -> "${fetched.size} models from ${instance.label}."

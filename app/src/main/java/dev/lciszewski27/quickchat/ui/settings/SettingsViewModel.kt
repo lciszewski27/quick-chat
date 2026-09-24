@@ -2,6 +2,8 @@ package dev.lciszewski27.quickchat.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.lciszewski27.quickchat.data.ai.AiCoreProvider
+import dev.lciszewski27.quickchat.data.ai.AiCoreStatus
 import dev.lciszewski27.quickchat.data.ai.ProviderResolver
 import dev.lciszewski27.quickchat.data.ai.Providers
 import dev.lciszewski27.quickchat.data.ai.skills.SkillExecutor
@@ -11,6 +13,8 @@ import dev.lciszewski27.quickchat.domain.model.FavoriteModel
 import dev.lciszewski27.quickchat.domain.model.ProviderInstance
 import dev.lciszewski27.quickchat.domain.model.Skill
 import dev.lciszewski27.quickchat.domain.repository.ChatRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,7 +34,11 @@ class SettingsViewModel(
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
+    private val aiCore = AiCoreProvider()
+    private var aiCoreDownloadJob: Job? = null
+
     init {
+        checkAiCoreStatus()
         viewModelScope.launch {
             combine(
                 preferences.dynamicColorEnabled,
@@ -94,7 +102,8 @@ class SettingsViewModel(
                                 apiKey = inst.apiKey,
                                 apiKeyVisible = visibility[inst.instanceId] == true,
                                 isSelected = inst.instanceId == snap.selProvider,
-                                isCustom = inst.type == Providers.custom.id
+                                isCustom = inst.type == Providers.custom.id,
+                                requiresKey = preset.requiresApiKey
                             )
                         }
                     )
@@ -214,6 +223,8 @@ class SettingsViewModel(
                 _uiState.update { it.copy(fetchingProviderId = event.instanceId, fetchedModels = emptyList(), fetchError = null) }
             }
             is SettingsUiEvent.FetchModels -> fetchModels(event.instanceId)
+            SettingsUiEvent.CheckAiCoreStatus -> checkAiCoreStatus()
+            SettingsUiEvent.DownloadAiCoreModel -> downloadAiCoreModel()
             is SettingsUiEvent.ToggleFavorite -> viewModelScope.launch {
                 if (repository.isFavorite(event.instanceId, event.model.id)) {
                     repository.removeFavorite(event.instanceId, event.model.id)
@@ -371,6 +382,39 @@ class SettingsViewModel(
                 }
             }
             _uiState.update { it.copy(secretsSkillId = null, secretValues = emptyMap()) }
+        }
+    }
+
+        private fun checkAiCoreStatus() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(aiCoreStatus = AiCoreStatus.Checking) }
+            _uiState.update { it.copy(aiCoreStatus = aiCore.status()) }
+        }
+    }
+
+    private fun downloadAiCoreModel() {
+        aiCoreDownloadJob?.cancel()
+        aiCoreDownloadJob = viewModelScope.launch {
+            _uiState.update { it.copy(aiCoreStatus = AiCoreStatus.Downloading(null)) }
+            try {
+                aiCore.download().collect { p ->
+                    when {
+                        p.error != null -> _uiState.update {
+                            it.copy(aiCoreStatus = AiCoreStatus.Failed(p.error))
+                        }
+                        p.done -> _uiState.update {
+                            it.copy(aiCoreStatus = AiCoreStatus.Ready)
+                        }
+                        else -> _uiState.update {
+                            it.copy(aiCoreStatus = AiCoreStatus.Downloading(p.fraction))
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(aiCoreStatus = AiCoreStatus.Failed(e.message ?: "download failed")) }
+            }
         }
     }
 

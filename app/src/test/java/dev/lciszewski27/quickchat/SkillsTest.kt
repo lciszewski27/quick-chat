@@ -1,6 +1,8 @@
 package dev.lciszewski27.quickchat
 
 import dev.lciszewski27.quickchat.data.ai.skills.CreateSkillTool
+import dev.lciszewski27.quickchat.data.ai.skills.ListSkillsTool
+import dev.lciszewski27.quickchat.data.ai.skills.RepoSkillToolSource
 import dev.lciszewski27.quickchat.data.ai.skills.SkillExecutor
 import dev.lciszewski27.quickchat.data.ai.skills.SkillValidation
 import dev.lciszewski27.quickchat.domain.model.ChatMessage
@@ -17,9 +19,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.Timeout
 
 class SkillsTest {
+
+    @get:Rule
+    val timeout: Timeout = Timeout.seconds(45)
 
     // ── Validation (pure) ────────────────────────────────────────────
     @Test
@@ -108,6 +115,40 @@ class SkillsTest {
         assertEquals("1:hunter2", executor.run("s1", """{"a":1}"""))
     }
 
+    @Test
+    fun gate_onlyTestedAndEnabledReachTheModel() = runBlocking {
+        val repo = FakeSkillRepo()
+        val executor = SkillExecutor(repo)
+        suspend fun add(id: String, tool: String, enabled: Boolean, tested: Boolean) {
+            repo.upsertSkill(
+                Skill(id, tool, tool, "d", "return 1;", """{"type":"object"}""",
+                    emptyList(), enabled, tested, 0, 0)
+            )
+        }
+        add("d1", "draft_skill", enabled = false, tested = false)
+        add("d2", "off_skill", enabled = false, tested = true)
+        add("d3", "active_skill", enabled = true, tested = true)
+        val names = RepoSkillToolSource(repo, executor).load().map { it.name }
+        assertEquals(listOf("active_skill"), names)
+    }
+
+    @Test
+    fun listSkills_showsStatusWithoutSecrets() = runBlocking {
+        val repo = FakeSkillRepo()
+        repo.upsertSkill(
+            Skill("d1", "Drafty", "drafty", "does things", "return 1;",
+                """{"type":"object"}""",
+                listOf(dev.lciszewski27.quickchat.domain.model.SecretDecl("API_TOKEN")),
+                enabled = false, tested = false, createdAt = 0, updatedAt = 0)
+        )
+        repo.setSecretValue("d1", "API_TOKEN", "super-secret-value")
+        val out = ListSkillsTool(repo).execute("{}")
+        assertTrue(out.contains("DRAFT"))
+        assertTrue(out.contains("API_TOKEN"))
+        // Values never leak into the listing.
+        assertTrue(!out.contains("super-secret-value"))
+    }
+
     /** Minimal fake: real skill/secret storage, TODO() elsewhere. */
     private class FakeSkillRepo : ChatRepository {
         private val skillsFlow = MutableStateFlow<List<Skill>>(emptyList())
@@ -143,7 +184,7 @@ class SkillsTest {
         override fun observeMessages(sessionId: String): Flow<List<ChatMessage>> = TODO()
         override suspend fun createSession(providerId: String, modelId: String): ChatSession = TODO()
         override suspend fun getSession(sessionId: String): ChatSession? = TODO()
-        override suspend fun appendMessage(sessionId: String, role: ChatRole, text: String, isError: Boolean): ChatMessage = TODO()
+        override suspend fun appendMessage(sessionId: String, role: ChatRole, text: String, isError: Boolean, genTokens: Int, genMs: Long): ChatMessage = TODO()
         override suspend fun updateSessionModel(sessionId: String, providerId: String, modelId: String) = TODO()
         override suspend fun renameSession(sessionId: String, title: String) = TODO()
         override suspend fun deleteSession(sessionId: String) = TODO()

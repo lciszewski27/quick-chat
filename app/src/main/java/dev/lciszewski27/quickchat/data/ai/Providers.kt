@@ -7,7 +7,10 @@ enum class LlmProtocol {
     OPENAI,
 
     /** Anthropic Messages API (`x-api-key`, SSE `content_block_delta`). */
-    ANTHROPIC
+    ANTHROPIC,
+
+    /** On-device Gemini Nano (ML Kit GenAI Prompt API) — no HTTP involved. */
+    AICORE
 }
 
 /**
@@ -26,6 +29,8 @@ data class ProviderConfig(
     val listPath: String,
     val apiKeyHint: String,
     val helpUrl: String,
+    /** False for keyless backends (on-device). */
+    val requiresApiKey: Boolean = true,
     val extraHeaders: Map<String, String> = emptyMap(),
     /** Anthropic only: required API version header + max output tokens. */
     val anthropicVersion: String = "2023-06-01",
@@ -111,8 +116,22 @@ object Providers {
         helpUrl = "https://platform.openai.com/docs/api-reference"
     )
 
+    /** On-device Gemini Nano — no key, no network for inference. */
+    val aicore = ProviderConfig(
+        id = "aicore",
+        displayName = "On-device (Gemini Nano)",
+        protocol = LlmProtocol.AICORE,
+        baseUrl = "",
+        chatPath = "",
+        listPath = "",
+        apiKeyHint = "",
+        helpUrl = "https://developer.android.com/ai/gemini-nano",
+        requiresApiKey = false
+    )
+
     /** Preset types offered in the Add-provider picker. */
-    fun presetTypes(): List<ProviderConfig> = listOf(gemini, openai, anthropic, openrouter, deepseek, custom)
+    fun presetTypes(): List<ProviderConfig> =
+        listOf(gemini, openai, anthropic, openrouter, deepseek, aicore, custom)
 
     fun preset(type: String): ProviderConfig? = presetTypes().find { it.id == type }
 

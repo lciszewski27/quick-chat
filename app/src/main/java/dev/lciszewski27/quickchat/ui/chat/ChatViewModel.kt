@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.lciszewski27.quickchat.data.ai.AiStreamEvent
 import dev.lciszewski27.quickchat.data.ai.ProviderResolver
-import dev.lciszewski27.quickchat.data.ai.Providers
 import dev.lciszewski27.quickchat.data.local.preferences.UserPreferencesDataStore
 import dev.lciszewski27.quickchat.domain.model.AiModelInfo
 import dev.lciszewski27.quickchat.domain.model.ChatRole
@@ -79,8 +78,9 @@ class ChatViewModel(
                             AiModelInfo(f.providerId, f.modelId, f.displayName, null)
                         },
                         providerLabels = prefs.instances.associate { i -> i.instanceId to i.label },
-                        hasApiKey = active?.apiKey?.isNotBlank() == true ||
-                            active?.type == Providers.custom.id
+                        hasApiKey = active?.let {
+                            !resolver.presetFor(it.type).requiresApiKey || it.apiKey.isNotBlank()
+                        } == true
                     )
                 }
             }
@@ -164,12 +164,18 @@ class ChatViewModel(
 
         streamJob?.cancel()
         streamJob = viewModelScope.launch {
-            _uiState.update { it.copy(isSending = true, error = null, input = "", streamingText = null, streamingSessionId = null, runningTool = null) }
+            _uiState.update { it.copy(isSending = true, error = null, input = "", streamingText = null, streamingSessionId = null, runningTool = null, streamingTps = null) }
+            var streamStartMs = 0L
+            fun statsFor(text: String): Pair<Int, Long> {
+                val ms = if (streamStartMs == 0L) 0L
+                else (System.currentTimeMillis() - streamStartMs).coerceAtLeast(1)
+                return estimateTokens(text.length) to ms
+            }
             try {
                 val instances = repository.observeProviderInstances().first()
                 val instance = activeInstance(instances, _uiState.value.selectedProviderId)
                     ?: throw IllegalStateException("Add a provider in Settings → Providers first.")
-                if (instance.apiKey.isBlank() && instance.type != Providers.custom.id) {
+                if (resolver.presetFor(instance.type).requiresApiKey && instance.apiKey.isBlank()) {
                     _uiState.update { it.copy(isSending = false, error = "Add your ${instance.label} API key in Settings → Providers.", input = text) }
                     lastFailedUserText = text
                     return@launch
@@ -208,7 +214,14 @@ class ChatViewModel(
                             when (event) {
                                 is AiStreamEvent.Text -> {
                                     acc.append(event.delta)
-                                    _uiState.update { it.copy(streamingText = acc.toString()) }
+                                    if (streamStartMs == 0L) {
+                                        streamStartMs = System.currentTimeMillis()
+                                    }
+                                    val tps = computeTps(
+                                        estimateTokens(acc.length),
+                                        System.currentTimeMillis() - streamStartMs
+                                    )
+                                    _uiState.update { it.copy(streamingText = acc.toString(), streamingTps = tps) }
                                 }
                                 is AiStreamEvent.ToolStarted -> {
                                     _uiState.update {
@@ -234,32 +247,41 @@ class ChatViewModel(
                 }
                 val full = acc.toString().trim()
                 if (full.isBlank()) throw IllegalStateException("Empty response")
-                repository.appendMessage(sid, ChatRole.MODEL, full)
+                val (tokens, ms) = statsFor(full)
+                repository.appendMessage(
+                    sid, ChatRole.MODEL, full, genTokens = tokens, genMs = ms
+                )
                 lastFailedUserText = null
-                _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null) }
+                _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null, streamingTps = null) }
             } catch (e: StreamStopped) {
                 val partial = e.partial.trim()
                 val sid = _uiState.value.streamingSessionId
                 if (sid != null && partial.isNotBlank()) {
-                    repository.appendMessage(sid, ChatRole.MODEL, partial)
+                    val (tokens, ms) = statsFor(partial)
+                    repository.appendMessage(
+                        sid, ChatRole.MODEL, partial, genTokens = tokens, genMs = ms
+                    )
                 }
                 lastFailedUserText = null
-                _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null) }
+                _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null, streamingTps = null) }
             } catch (e: CancellationException) {
-                _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null) }
+                _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null, streamingTps = null) }
             } catch (e: Exception) {
                 val partial = _uiState.value.streamingText?.trim().orEmpty()
                 val sid = _uiState.value.streamingSessionId
                 if (sid != null && partial.isNotBlank()) {
                     // Keep what arrived, then report the failure separately.
-                    repository.appendMessage(sid, ChatRole.MODEL, partial)
-                    _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null, error = e.message ?: "Request failed") }
+                    val (tokens, ms) = statsFor(partial)
+                    repository.appendMessage(
+                        sid, ChatRole.MODEL, partial, genTokens = tokens, genMs = ms
+                    )
+                    _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null, streamingTps = null, error = e.message ?: "Request failed") }
                 } else {
                     if (sid != null) {
                         repository.appendMessage(sid, ChatRole.MODEL, "Sorry — ${e.message ?: "request failed"}.", isError = true)
                     }
                     lastFailedUserText = text
-                    _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null, error = e.message ?: "Request failed") }
+                    _uiState.update { it.copy(isSending = false, streamingText = null, streamingSessionId = null, runningTool = null, streamingTps = null, error = e.message ?: "Request failed") }
                 }
             }
         }

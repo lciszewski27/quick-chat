@@ -21,6 +21,8 @@ data class ChatUiState(
     val streamingSessionId: String? = null,
     /** Tool currently executing (live indicator); null when idle/done. */
     val runningTool: RunningTool? = null,
+    /** Live generation speed; null until enough text/time has passed. */
+    val streamingTps: Float? = null,
     val error: String? = null,
     val selectedProviderId: String = "gemini",
     val selectedModelId: String = "",

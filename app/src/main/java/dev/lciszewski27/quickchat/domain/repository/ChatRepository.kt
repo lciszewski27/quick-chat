@@ -13,7 +13,7 @@ interface ChatRepository {
     fun observeMessages(sessionId: String): Flow<List<ChatMessage>>
     suspend fun createSession(providerId: String, modelId: String): ChatSession
     suspend fun getSession(sessionId: String): ChatSession?
-    suspend fun appendMessage(sessionId: String, role: dev.lciszewski27.quickchat.domain.model.ChatRole, text: String, isError: Boolean = false): ChatMessage
+    suspend fun appendMessage(sessionId: String, role: dev.lciszewski27.quickchat.domain.model.ChatRole, text: String, isError: Boolean = false, genTokens: Int = 0, genMs: Long = 0): ChatMessage
     suspend fun updateSessionModel(sessionId: String, providerId: String, modelId: String)
     suspend fun renameSession(sessionId: String, title: String)
     suspend fun deleteSession(sessionId: String)

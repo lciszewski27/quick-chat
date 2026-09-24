@@ -18,6 +18,7 @@ foundation = "1.12.0"
 okhttp = "4.12.0"
 markdownRenderer = "0.40.0"
 quickjs = "1.0.3"
+mlkitGenaiPrompt = "1.0.0-beta2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -55,6 +56,9 @@ markdown-renderer-m3 = { group = "com.mikepenz", name = "multiplatform-markdown-
 # Sandboxed JavaScript runtime for the run_javascript tool (dokar3 QuickJS-KT)
 quickjs-kt = { module = "io.github.dokar3:quickjs-kt", version.ref = "quickjs" }
 quickjs-kt-jvm = { module = "io.github.dokar3:quickjs-kt-jvm", version.ref = "quickjs" }
+
+# On-device Gemini Nano via ML Kit GenAI Prompt API (beta, AICore-backed)
+mlkit-genai-prompt = { group = "com.google.mlkit", name = "genai-prompt", version.ref = "mlkitGenaiPrompt" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

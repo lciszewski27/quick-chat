@@ -4,7 +4,6 @@ import dev.lciszewski27.quickchat.data.ai.skills.SkillToolSource
 import dev.lciszewski27.quickchat.data.ai.tools.AiTool
 import dev.lciszewski27.quickchat.data.ai.tools.AiTools
 import dev.lciszewski27.quickchat.domain.model.ProviderInstance
-
 /**
  * Builds a live [SdkProvider] for a user-added [ProviderInstance].
  * Preset types contribute protocol/paths/hints; the instance contributes
@@ -18,8 +17,9 @@ class ProviderResolver(
     private val skillTools: SkillToolSource? = null
 ) {
 
-    fun resolve(instance: ProviderInstance): SdkProvider {
+    fun resolve(instance: ProviderInstance): AiProvider {
         val preset = Providers.preset(instance.type) ?: Providers.custom
+        if (preset.protocol == LlmProtocol.AICORE) return AiCoreProvider()
         val effective = preset.copy(
             id = instance.instanceId,
             displayName = instance.label.ifBlank { preset.displayName },

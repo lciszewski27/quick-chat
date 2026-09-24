@@ -18,7 +18,7 @@ foundation = "1.12.0"
 okhttp = "4.12.0"
 markdownRenderer = "0.40.0"
 quickjs = "1.0.3"
-mlkitGenaiPrompt = "1.0.0-beta2"
+mlkitGenaiPrompt = "1.0.0-beta4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

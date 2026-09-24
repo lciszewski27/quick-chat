@@ -16,8 +16,8 @@ kotlinxSerializationJson = "1.11.0"
 material3 = "1.5.0-alpha28"
 foundation = "1.12.0"
 okhttp = "4.12.0"
-markdownRenderer = "0.40.0"
-quickjs = "1.0.3"
+markdownRenderer = "0.45.0"
+quickjs = "1.0.15"
 mlkitGenaiPrompt = "1.0.0-beta2"
 
 [libraries]
